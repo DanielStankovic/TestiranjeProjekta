@@ -1,0 +1,31 @@
+- Da se prilikom inflate ne stavlja parent, false nego da se stavi NULL samo, samo jedan argument.
+
+- Da se u if(covertView == null) stavo tag za viewHolder.checbox.settag (true). 
+ Da se u else bloku preuzme taj tag nekako
+
+- Da se odradi nesto kao ovo gore samo sa dodatnim booleanom. Da se stavi uslov 
+
+
+
+ @Override
+  public int getViewTypeCount() {
+      if(getCount() < 1)
+            return 1;
+      return getCount();
+  }
+
+  @Override
+  public int getItemViewType(int position) {
+
+   return position;
+  }
+
+
+
+
+ListView is android:choiceMode="multiple".
+
+
+http://lalit3686.blogspot.com/2012/06/today-i-am-going-to-show-how-to-deal.html
+
+
