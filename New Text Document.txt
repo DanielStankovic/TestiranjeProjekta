@@ -1,0 +1,330 @@
+1.	Razlika izmedju Inner, Left Outer, Rigt Outer i Full Outer Join-a
+2.	Osobine primarnog kljuca, navesti i kratko objasniti
+3.	Tipovi povezanosti i prevodjenje E-R modela na relacioni oblik
+4.	Razlika izmedju funkcije i stored procedure
+5.	Sta su view-ovi i kako se koriste
+6.	Sta su agregatne funkcije i kako se koriste
+7.	Kada se koristi having
+8.	Sta su index-i
+9.	Kako uzeti prvih 100 redova koji odgovaraju nekom upitu
+
+
+
+1.	Razlika izmedju Inner, Left Outer, Rigt Outer i Full Outer Join-a
+2.	Osobine primarnog kljuca, navesti i kratko objasniti
+3.	Tipovi povezanosti i prevodjenje E-R modela na relacioni oblik
+4.	Razlika izmedju funkcije i stored procedure
+5.	Sta su view-ovi i kako se koriste
+6.	Sta su agregatne funkcije i kako se koriste
+7.	Kada se koristi having
+8.	U servisnom centru se popravljaju kucni elektricni uredjaji:
+a.	Za svakog servisera se vode osnovni licni podaci (ime, prezime, adresa, telefon, datum rodjenja), naziv proizvodjaca za koje je proizvode specijalizovan, telefon i adresa proizvodjaca, kao i naziv i opis svakog sertifikata koji je serviser stakao. Svaki serviser je specijalizovan i popravlja uredjaje tacno jednog proizvodjaca. Vise servisera moze da se bavi proizvodima istog proizvodjaca. Svaki proizvodjac obezbedjuje nekoliko sertifikata za servisere (nijedan sertifikat se ne odnosi na vise proizvodjaca)
+b.	Za svaki uredjaj koji dodje u servis se vode naziv, broj artikla (koji dodeljuje proizvodjac), serijski broj proizvoda, proizvodjacka specifikacija, podaci o serviseru koji je zaduzen za opravljanje uredjaja, datum prijema u servis i datum zavrsetka opravke
+Svodjenjem do 3NF izvesti model baze podataka
+
+------------------------------------------------------------------------------------------------------
+
+ALTER PROCEDURE [dbo].[sp_rpt_TaskManager] 
+	(
+		@CompanyID int = NULL,
+		@ProjectID int = NULL,
+		@PersonID int = NULL,
+		@ResponsiblePersonID INT = NULL,
+--		@TaskCode nvarchar(20) = NULL,
+		@PeriodFrom datetime = NULL,
+		@PeriodTo datetime = NULL,
+		@TaskTypeID int = NULL
+	)
+AS
+BEGIN
+SET NOCOUNT ON;
+
+SELECT t.TaskID, t.PersonID, p.Name + ' ' + p.Surname AS PersonFullName, c.CompanyID, c.Name AS CompanyName, t.ProjectID, proj.Name AS ProjectName, 
+t.TaskTypeID, tt.Name AS TaskTypeName, t.TaskStatusID, ts.Name AS TaskStatusName, t.TaskPercentID, tp.Name AS TaskPercentName, t.FromDate, 
+t.ToDate, t.RealTime, t.AcceptedTime, t.Checked, t.InvoiceTime, t.Code, t.Description, t.TaskPriorityID, tp2.Name AS TaskPriorityName, t.PeriodFrom, 
+t.PeriodTo, t.PeriodTime
+FROM Task AS t INNER JOIN
+Person AS p ON p.PersonID = t.PersonID INNER JOIN
+Project AS proj ON proj.ProjectID = t.ProjectID INNER JOIN
+Company AS c ON c.CompanyID = proj.CompanyID LEFT OUTER JOIN
+TaskType AS tt ON tt.TaskTypeID = t.TaskTypeID LEFT OUTER JOIN
+TaskStatus AS ts ON ts.TaskStatusID = t.TaskStatusID LEFT OUTER JOIN
+TaskPercent AS tp ON tp.TaskPercentID = t.TaskPercentID LEFT OUTER JOIN
+TaskPriority AS tp2 ON tp2.TaskPriorityID = t.TaskPriorityID
+WHERE c.CompanyID = CASE WHEN @CompanyID IS NULL THEN c.CompanyID ELSE @CompanyID END AND 
+proj.ProjectID = CASE WHEN @ProjectID IS NULL THEN proj.ProjectID ELSE @ProjectID END AND
+p.PersonID = CASE WHEN @PersonID IS NULL THEN p.PersonID ELSE @PersonID END AND
+((@ResponsiblePersonID is null and (proj.ResponsiblePersonID is null or proj.ResponsiblePersonID is not null)) or (@ResponsiblePersonID is not null and proj.ResponsiblePersonID = @ResponsiblePersonID))	AND
+t.TaskTypeID = CASE WHEN @TaskTypeID IS NULL THEN t.TaskTypeID ELSE @TaskTypeID END AND
+t.PeriodFrom >= CASE WHEN @PeriodFrom IS NULL THEN t.PeriodFrom ELSE convert(varchar, @PeriodFrom, 101)+' 00:00:00:000' END AND
+t.PeriodTo <= CASE WHEN @PeriodTo IS NULL THEN t.PeriodTo ELSE convert(varchar, @PeriodTo, 101)+' 23:59:59:999' END
+ORDER BY c.Name,proj.Name,t.PeriodFrom,t.PeriodTo
+END
+ 
+ALTER PROCEDURE [dbo].[EmployeeTargetInfo]
+(@EmployeeID int)
+AS
+BEGIN
+DECLARE @FirstDay datetime,@achieved decimal(18,2),@planned decimal(18,2),         @SoldDaily decimal(18,2),@LastDay datetime,@EstimatedSales decimal(18,2),
+@SalesToTarget decimal(18,2),@SalesToTargetDaily decimal(18,2)
+set @FirstDay=(SELECT CONVERT(VARCHAR(25),DATEADD(dd,-(DAY(GETDATE())-1),GETDATE()),102))
+set @LastDay=(SELECT CONVERT(VARCHAR(25),DATEADD(dd,-(DAY(DATEADD(mm,1,GETDATE()))),DATEADD(mm,1,GETDATE())),102))
+set @achieved= (
+        SELECT SUM(DET.QUANTITY*prod.BOXQUANTITYKG)
+        FROM [ORDER] ORD
+        JOIN ORDERDETAILS DET
+        ON ORD.ORDERID=DET.ORDERID
+        JOIN PRODUCT prod
+         ON prod.PRODUCTID=det.PRODUCTID
+        WHERE ORD.EMPLOYEEID=@EmployeeID
+        AND ORD.ORDERCREATEDATE BETWEEN @FirstDay and GETDATE()
+        )
+set @planned= ( 
+        select PLANNEDQUANTITYKG
+        from SALESPLAN
+        where EMPLOYEEID=@EmployeeID
+        and YEARNUM=YEAR(getdate())
+        and MONTHNUM=MONTH(getdate())
+        )
+if(@achieved>=@planned)
+begin
+set @SoldDaily=@achieved/(select DATEPART(day,getdate()))
+set @EstimatedSales=@SoldDaily*(select DATEPART(day,@LastDay))
+select @achieved as prodato_do_danas_kg
+       ,@planned as planirano_za_mesec_kg
+       ,@SoldDaily as prosjecna_dnevna_prodaja_kg
+       ,@EstimatedSales as procenjena_prodaja_za_mesec_kg
+       ,0 as koliko_treba_prodati_do_plana_kg
+       ,0 as koliko_treba_dnevno_prodati_do_plana_kg
+        end
+else
+begin
+set @SoldDaily=@achieved/(select DATEPART(day,getdate()))
+set @EstimatedSales=@SoldDaily*(select DATEPART(day,@LastDay))
+set @SalesToTarget=@planned-@achieved
+set @SalesToTargetDaily=@SalesToTarget/(DATEDIFF(day,getdate(),@LastDay))
+select @achieved as ACHIEVEDQUANTITYKG
+      ,@planned as PLANNEDQUANTITYKG
+      ,@EstimatedSales as SALESESTIMATEDKG
+      ,@SalesToTargetDaily as SALESTOTARGETDAILYKG
+end                 
+END
+ 
+ALTER PROCEDURE [dbo].[spORDERDETAILS]
+	 @T char(1)='S'
+	,@ORDERID uniqueidentifier=NULL
+	,@EMPLOYEEID int=NULL
+	,@STOREID int=NULL
+AS
+BEGIN	
+IF @T='S'
+BEGIN
+IF @EMPLOYEEID IS NOT NULL
+BEGIN
+IF @STOREID IS NOT NULL
+BEGIN
+SELECT ORDERID
+	,PRODUCTTITLE
+	,QUANTITY
+	,PRICE
+	,[ACTION]=CAST([ACTION] AS int)
+FROM vORDERDETAILS
+WHERE ORDERID IN (
+	SELECT TOP 3 ORDERID
+	FROM vORDER
+	WHERE EMPLOYEEID=@EMPLOYEEID AND STOREID=@STOREID
+	ORDER BY ORDERCREATEDATE DESC
+	)
+END
+ELSE
+BEGIN
+SELECT ORDERID
+	,PRODUCTTITLE
+	,QUANTITY
+	,PRICE
+	,[ACTION]=CAST([ACTION] AS int)
+FROM vORDERDETAILS
+WHERE ORDERID IN (
+	SELECT ORDERID
+	FROM vORDER
+	WHERE CONVERT(VARCHAR, ORDERCREATEDATE, 112)=CONVERT(VARCHAR, GETDATE(), 112) AND EMPLOYEEID=@EMPLOYEEID			
+	)
+END
+END
+ELSE
+BEGIN
+SELECT PRODUCTID
+	,PRODUCTTITLE
+	,QUANTITY
+	,PRICE
+	,[ACTION]
+FROM vORDERDETAILS
+WHERE ORDERID=@ORDERID 
+END 
+END 
+END
+ 
+1.	Šta rade prethodne 3 stored procedure?
+2.	Izmeniti prvu stored proceduru, tako da se vide podaci o svim kompanijama i o svim osobama, bez obzira na to da li za njih postoje taskovi.
+3.	Izmeniti poslednju proceduru tako da se dobija ukupna narucena kolicina po artiklu za dati objekat.
+4.	Zameniti vrednosti dve promenljive bez upotrebe pomocnih promenljivih.
+5.	Aplikacija na PDA uredaju komunicira sa serverom. Preuzimanje podataka sa servera se vrši tako što se napravi backup postojece baze (kopiranje fajla u kom je smeštena baza). Nakon toga se glavna baza obriše, kreira se nova baza u koju se dovuku podaci sa servera. Prilikom brisanja glavne baze sa uredaja, dešava se da se pojavi poruka da ne može da obriše bazu jer je koristi neki drugi proces. Koji su moguci uzroci?
+6.	Kako povezati bazu nas serveru i PDA uredaj? (Opšta ideja, bez zalaženja u detalje)
+
+
+
+----------------------------------------------------------------------------------------------------
+
+
+1.	Svodenjem na normalne forme napraviti model baze podataka
+U zoološkom vrtu se vode podaci o životinjama u vrtu:
+-	Za svaku životinju se vode sledeci podaci: tip  (npr. kicmenjaci), klasa (npr. sisar), red, familija, rod, vrsta, zemlja porekla, godina rodenja, boja (opisno), vlastito ime životinje (jedinstveno za vrstu), težina, koliko puta dnevno se hrani, prosecna težina obroka, u kojoj meri je opasna po ljude (posebno kao vrsta, posebno kao jedinka, dve ocene, od 1 do 10)
+-	O kavezu u kome se životinja cuva se vode sledeci podaci: redni broj kaveza, površina kaveza, vrsta obezbedenja (žicana ograda, rov, rešetka...), da li ima tekucu vodu, da li postoji zaklon od kiše, da li postoji zaklon od posetilaca, ime i prezime cuvara koji hrani životinje i održava cistocu kaveza, godinu rodenja cuvara
+-	U jednom kavezu može biti više životinja. Za jedan kavez može biti zaduženo više cuvara. Jedan cuvar se može starati o više kaveza
+2.	Izvuci listu robnih marki koje su porucene u poslednjih godinu dana, a nisu porucene u poslednjih mesec dana. Potrebno je prikazati sledece podatke: Ime komercijaliste, naziv mesta isporuke, naziv robne marke
+3.	Prikazati popisane cene po mestu isporuke. Podaci koje je potrebno prikazati su: Naziv mesta isporuke, kategorija mesta isporuke, ime komercijaliste koji je uradio popis, robnu marku artikla, naziv artikla, šifru artikla, cenu, datum kada je uraden popis tog artikla 
+
+-----------------------------------------------------------------------------------------------------------
+
+ALTER PROCEDURE [dbo].[sp_rpt_TaskManager] 
+	(
+		@CompanyID int = NULL,
+		@ProjectID int = NULL,
+		@PersonID int = NULL,
+		@ResponsiblePersonID INT = NULL,
+--		@TaskCode nvarchar(20) = NULL,
+		@PeriodFrom datetime = NULL,
+		@PeriodTo datetime = NULL,
+		@TaskTypeID int = NULL
+	)
+AS
+BEGIN
+SET NOCOUNT ON;
+
+SELECT t.TaskID, t.PersonID, p.Name + ' ' + p.Surname AS PersonFullName, c.CompanyID, c.Name AS CompanyName, t.ProjectID, proj.Name AS ProjectName, 
+t.TaskTypeID, tt.Name AS TaskTypeName, t.TaskStatusID, ts.Name AS TaskStatusName, t.TaskPercentID, tp.Name AS TaskPercentName, t.FromDate, 
+t.ToDate, t.RealTime, t.AcceptedTime, t.Checked, t.InvoiceTime, t.Code, t.Description, t.TaskPriorityID, tp2.Name AS TaskPriorityName, t.PeriodFrom, 
+t.PeriodTo, t.PeriodTime
+FROM Task AS t INNER JOIN
+Person AS p ON p.PersonID = t.PersonID INNER JOIN
+Project AS proj ON proj.ProjectID = t.ProjectID INNER JOIN
+Company AS c ON c.CompanyID = proj.CompanyID LEFT OUTER JOIN
+TaskType AS tt ON tt.TaskTypeID = t.TaskTypeID LEFT OUTER JOIN
+TaskStatus AS ts ON ts.TaskStatusID = t.TaskStatusID LEFT OUTER JOIN
+TaskPercent AS tp ON tp.TaskPercentID = t.TaskPercentID LEFT OUTER JOIN
+TaskPriority AS tp2 ON tp2.TaskPriorityID = t.TaskPriorityID
+WHERE c.CompanyID = CASE WHEN @CompanyID IS NULL THEN c.CompanyID ELSE @CompanyID END AND 
+proj.ProjectID = CASE WHEN @ProjectID IS NULL THEN proj.ProjectID ELSE @ProjectID END AND
+p.PersonID = CASE WHEN @PersonID IS NULL THEN p.PersonID ELSE @PersonID END AND
+((@ResponsiblePersonID is null and (proj.ResponsiblePersonID is null or proj.ResponsiblePersonID is not null)) or (@ResponsiblePersonID is not null and proj.ResponsiblePersonID = @ResponsiblePersonID))	AND
+t.TaskTypeID = CASE WHEN @TaskTypeID IS NULL THEN t.TaskTypeID ELSE @TaskTypeID END AND
+t.PeriodFrom >= CASE WHEN @PeriodFrom IS NULL THEN t.PeriodFrom ELSE convert(varchar, @PeriodFrom, 101)+' 00:00:00:000' END AND
+t.PeriodTo <= CASE WHEN @PeriodTo IS NULL THEN t.PeriodTo ELSE convert(varchar, @PeriodTo, 101)+' 23:59:59:999' END
+ORDER BY c.Name,proj.Name,t.PeriodFrom,t.PeriodTo
+END
+ 
+ALTER PROCEDURE [dbo].[EmployeeTargetInfo]
+(@EmployeeID int)
+AS
+BEGIN
+DECLARE @FirstDay datetime,@achieved decimal(18,2),@planned decimal(18,2),         @SoldDaily decimal(18,2),@LastDay datetime,@EstimatedSales decimal(18,2),
+@SalesToTarget decimal(18,2),@SalesToTargetDaily decimal(18,2)
+set @FirstDay=(SELECT CONVERT(VARCHAR(25),DATEADD(dd,-(DAY(GETDATE())-1),GETDATE()),102))
+set @LastDay=(SELECT CONVERT(VARCHAR(25),DATEADD(dd,-(DAY(DATEADD(mm,1,GETDATE()))),DATEADD(mm,1,GETDATE())),102))
+set @achieved= (
+        SELECT SUM(DET.QUANTITY*prod.BOXQUANTITYKG)
+        FROM [ORDER] ORD
+        JOIN ORDERDETAILS DET
+        ON ORD.ORDERID=DET.ORDERID
+        JOIN PRODUCT prod
+         ON prod.PRODUCTID=det.PRODUCTID
+        WHERE ORD.EMPLOYEEID=@EmployeeID
+        AND ORD.ORDERCREATEDATE BETWEEN @FirstDay and GETDATE()
+        )
+set @planned= ( 
+        select PLANNEDQUANTITYKG
+        from SALESPLAN
+        where EMPLOYEEID=@EmployeeID
+        and YEARNUM=YEAR(getdate())
+        and MONTHNUM=MONTH(getdate())
+        )
+if(@achieved>=@planned)
+begin
+set @SoldDaily=@achieved/(select DATEPART(day,getdate()))
+set @EstimatedSales=@SoldDaily*(select DATEPART(day,@LastDay))
+select @achieved as prodato_do_danas_kg
+       ,@planned as planirano_za_mesec_kg
+       ,@SoldDaily as prosjecna_dnevna_prodaja_kg
+       ,@EstimatedSales as procenjena_prodaja_za_mesec_kg
+       ,0 as koliko_treba_prodati_do_plana_kg
+       ,0 as koliko_treba_dnevno_prodati_do_plana_kg
+        end
+else
+begin
+set @SoldDaily=@achieved/(select DATEPART(day,getdate()))
+set @EstimatedSales=@SoldDaily*(select DATEPART(day,@LastDay))
+set @SalesToTarget=@planned-@achieved
+set @SalesToTargetDaily=@SalesToTarget/(DATEDIFF(day,getdate(),@LastDay))
+select @achieved as ACHIEVEDQUANTITYKG
+      ,@planned as PLANNEDQUANTITYKG
+      ,@EstimatedSales as SALESESTIMATEDKG
+      ,@SalesToTargetDaily as SALESTOTARGETDAILYKG
+end                 
+END
+ 
+ALTER PROCEDURE [dbo].[spORDERDETAILS]
+	 @T char(1)='S'
+	,@ORDERID uniqueidentifier=NULL
+	,@EMPLOYEEID int=NULL
+	,@STOREID int=NULL
+AS
+BEGIN	
+IF @T='S'
+BEGIN
+IF @EMPLOYEEID IS NOT NULL
+BEGIN
+IF @STOREID IS NOT NULL
+BEGIN
+SELECT ORDERID
+	,PRODUCTTITLE
+	,QUANTITY
+	,PRICE
+	,[ACTION]=CAST([ACTION] AS int)
+FROM vORDERDETAILS
+WHERE ORDERID IN (
+	SELECT TOP 3 ORDERID
+	FROM vORDER
+	WHERE EMPLOYEEID=@EMPLOYEEID AND STOREID=@STOREID
+	ORDER BY ORDERCREATEDATE DESC
+	)
+END
+ELSE
+BEGIN
+SELECT ORDERID
+	,PRODUCTTITLE
+	,QUANTITY
+	,PRICE
+	,[ACTION]=CAST([ACTION] AS int)
+FROM vORDERDETAILS
+WHERE ORDERID IN (
+	SELECT ORDERID
+	FROM vORDER
+	WHERE CONVERT(VARCHAR, ORDERCREATEDATE, 112)=CONVERT(VARCHAR, GETDATE(), 112) AND EMPLOYEEID=@EMPLOYEEID			
+	)
+END
+END
+ELSE
+BEGIN
+SELECT PRODUCTID
+	,PRODUCTTITLE
+	,QUANTITY
+	,PRICE
+	,[ACTION]
+FROM vORDERDETAILS
+WHERE ORDERID=@ORDERID 
+END 
+END 
+END
+
+
+
